@@ -48,6 +48,9 @@ static BOOL AFSecKeyIsEqualToKey(SecKeyRef key1, SecKeyRef key2) {
 #endif
 }
 
+/**
+ 获取证书公钥
+ */
 static id AFPublicKeyForCertificate(NSData *certificate) {
     id allowedPublicKey = nil;
     SecCertificateRef allowedCertificate;
@@ -58,15 +61,25 @@ static id AFPublicKeyForCertificate(NSData *certificate) {
     SecTrustResultType result;
 
     allowedCertificate = SecCertificateCreateWithData(NULL, (__bridge CFDataRef)certificate);
+    /*
+     这里使用了一个非常神奇的宏 __Require_Quiet，
+     它会判断 allowedCertificate != NULL 是否成立，
+     如果 allowedCertificate 为空就会跳到 _out 标签处继续执行
+     */
     __Require_Quiet(allowedCertificate != NULL, _out);
 
     allowedCertificates[0] = allowedCertificate;
     tempCertificates = CFArrayCreate(NULL, (const void **)allowedCertificates, 1, NULL);
 
+    /*
+     创建一个默认的符合 X509 标准的 SecPolicyRef
+     通过默认的 SecPolicyRef 和证书创建一个 SecTrustRef 用于信任评估，对该对象进行信任评估，确认生成的 SecTrustRef 是值得信任的。
+     */
     policy = SecPolicyCreateBasicX509();
     __Require_noErr_Quiet(SecTrustCreateWithCertificates(tempCertificates, policy, &allowedTrust), _out);
     __Require_noErr_Quiet(SecTrustEvaluate(allowedTrust, &result), _out);
 
+    // 这里的 __bridge_transfer 会将结果桥接成 NSObject 对象，然后将 SecTrustCopyPublicKey 返回的指针释放。
     allowedPublicKey = (__bridge_transfer id)SecTrustCopyPublicKey(allowedTrust);
 
 _out:
@@ -155,6 +168,9 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
 
 @implementation AFSecurityPolicy
 
+/**
+ 根据bundle路径查找.cer证书，并将其转化成data
+ */
 + (NSSet *)certificatesInBundle:(NSBundle *)bundle {
     NSArray *paths = [bundle pathsForResourcesOfType:@"cer" inDirectory:@"."];
 
@@ -171,6 +187,7 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
     static NSSet *_defaultPinnedCertificates = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+        // 这里返回当前类的bundle
         NSBundle *bundle = [NSBundle bundleForClass:[self class]];
         _defaultPinnedCertificates = [self certificatesInBundle:bundle];
     });
@@ -212,6 +229,7 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
 - (void)setPinnedCertificates:(NSSet *)pinnedCertificates {
     _pinnedCertificates = pinnedCertificates;
 
+    // 从全部的证书中取出公钥并持有
     if (self.pinnedCertificates) {
         NSMutableSet *mutablePinnedPublicKeys = [NSMutableSet setWithCapacity:[self.pinnedCertificates count]];
         for (NSData *certificate in self.pinnedCertificates) {
@@ -232,6 +250,10 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
 - (BOOL)evaluateServerTrust:(SecTrustRef)serverTrust
                   forDomain:(NSString *)domain
 {
+    /*
+     如果没有提供证书或者不验证证书，并且还设置 allowInvalidCertificates 为真，
+     满足上面的所有条件，说明这次的验证是不安全的，会直接返回 NO
+     */
     if (domain && self.allowInvalidCertificates && self.validatesDomainName && (self.SSLPinningMode == AFSSLPinningModeNone || [self.pinnedCertificates count] == 0)) {
         // https://developer.apple.com/library/mac/documentation/NetworkingInternet/Conceptual/NetworkingTopics/Articles/OverridingSSLChainValidationCorrectly.html
         //  According to the docs, you should only trust your provided certs for evaluation.
@@ -245,7 +267,12 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
         return NO;
     }
 
+    // 设置policy
     NSMutableArray *policies = [NSMutableArray array];
+    /*
+     如果要验证域名的话，就以域名为参数创建一个 SecPolicyRef，
+     否则会创建一个符合 X509 标准的默认 SecPolicyRef 对象
+     */
     if (self.validatesDomainName) {
         [policies addObject:(__bridge_transfer id)SecPolicyCreateSSL(true, (__bridge CFStringRef)domain)];
     } else {
@@ -254,9 +281,14 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
 
     SecTrustSetPolicies(serverTrust, (__bridge CFArrayRef)policies);
 
+    /*
+     如果只根据信任列表中的证书进行验证，即 self.SSLPinningMode == AFSSLPinningModeNone，
+     如果允许无效的证书的就会直接返回 YES。不允许就会对服务端信任进行验证
+     */
     if (self.SSLPinningMode == AFSSLPinningModeNone) {
         return self.allowInvalidCertificates || AFServerTrustIsValid(serverTrust);
     } else if (!AFServerTrustIsValid(serverTrust) && !self.allowInvalidCertificates) {
+        // 如果服务器信任无效，并且不允许无效证书，就会返回 NO
         return NO;
     }
 
@@ -265,6 +297,13 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
         default:
             return NO;
         case AFSSLPinningModeCertificate: {
+            /*
+             1.从 self.pinnedCertificates 中获取 DER 表示的数据
+             2.使用 SecTrustSetAnchorCertificates 为服务器信任设置证书
+             3.判断服务器信任的有效性
+             4.使用 AFCertificateTrustChainForServerTrust 获取服务器信任中的全部 DER 表示的证书
+             5.如果 pinnedCertificates 中有相同的证书，就会返回 YES
+             */
             NSMutableArray *pinnedCertificates = [NSMutableArray array];
             for (NSData *certificateData in self.pinnedCertificates) {
                 [pinnedCertificates addObject:(__bridge_transfer id)SecCertificateCreateWithData(NULL, (__bridge CFDataRef)certificateData)];
@@ -287,6 +326,11 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
             return NO;
         }
         case AFSSLPinningModePublicKey: {
+            /*
+             这部分的实现和上面的差不多，区别有两点
+             1.会从服务器信任中获取公钥
+             2.pinnedPublicKeys 中的公钥与服务器信任中的公钥相同的数量大于 0，就会返回真
+             */
             NSUInteger trustedPublicKeyCount = 0;
             NSArray *publicKeys = AFPublicKeyTrustChainForServerTrust(serverTrust);
 

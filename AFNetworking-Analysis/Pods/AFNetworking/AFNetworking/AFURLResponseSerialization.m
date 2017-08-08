@@ -60,6 +60,9 @@ static BOOL AFErrorOrUnderlyingErrorHasCodeInDomain(NSError *error, NSInteger co
     return NO;
 }
 
+/**
+ 遍历返回的Json，移除value为null的key，这里使用了递归
+ */
 static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingOptions readingOptions) {
     if ([JSONObject isKindOfClass:[NSArray class]]) {
         NSMutableArray *mutableArray = [NSMutableArray arrayWithCapacity:[(NSArray *)JSONObject count]];
@@ -99,6 +102,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
     self.stringEncoding = NSUTF8StringEncoding;
 
+    // 默认初始化acceptableStatusCodes为200-299
     self.acceptableStatusCodes = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(200, 100)];
     self.acceptableContentTypes = nil;
 
@@ -107,6 +111,12 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
 #pragma mark -
 
+/**
+ 这个方法主要用来：
+ 1、校验返回的response的MIMEType是否被包含在外界设置的acceptableContentTypes中，如果不在，返回描述为unacceptable content-type的NSError对象
+ 2、校验返回的response的statusCode是否被包含在外界设置的acceptableStatusCodes中，如果不在，返回实际response的statusCode的NSError对象
+ 其中AFErrorWithUnderlyingError函数用来返回一个复合的NSError，其中第二个Error作为子Error保存在第一个Error的UserInfo的NSUnderlyingErrorKey中
+*/
 - (BOOL)validateResponse:(NSHTTPURLResponse *)response
                     data:(NSData *)data
                    error:(NSError * __autoreleasing *)error
@@ -214,6 +224,14 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
 + (instancetype)serializerWithReadingOptions:(NSJSONReadingOptions)readingOptions {
     AFJSONResponseSerializer *serializer = [[self alloc] init];
+    /*
+     解释一下NSJSONReadingOptions这个枚举属性
+     NSJSONReadingMutableContainers：返回可变容器，NSMutableDictionary或NSMutableArray。
+     NSJSONReadingMutableLeaves：返回的JSON对象中字符串的值为NSMutableString，目前在iOS 7上测试不好用，应该是个bug，参见：
+     http://stackoverflow.com/questions/19345864/nsjsonreadingmutableleaves-option-is-not-working
+     NSJSONReadingAllowFragments：允许JSON字符串最外层既不是NSArray也不是NSDictionary，但必须是有效的JSON Fragment。例如使用这个选项可以解析 @“123” 这样的字符串。参见：
+     http://stackoverflow.com/questions/16961025/nsjsonserialization-nsjsonreadingallowfragments-reading
+    */
     serializer.readingOptions = readingOptions;
 
     return serializer;
@@ -244,6 +262,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
     id responseObject = nil;
     NSError *serializationError = nil;
+    // 解决了返回的Json仅仅是一个空格的情况的BUG
     // Workaround for behavior of Rails to return a single space for `head :ok` (a workaround for a bug in Safari), which is not interpreted as valid input by NSJSONSerialization.
     // See https://github.com/rails/rails/issues/1742
     BOOL isSpace = [data isEqualToData:[NSData dataWithBytes:" " length:1]];

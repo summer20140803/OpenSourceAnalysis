@@ -70,7 +70,11 @@
     if (!self) {
         return nil;
     }
-
+    
+    /* 
+     这段代码仅仅只是判断传入的URL后缀是否以斜杠` / `结尾，如果没有，则会自动给URL结尾添加一个` / `，
+     因为这是BaseURL的请求方法，所以对应的请求parameter和actionPath并不会传入到这里，其实只是便于后面拼接其他路径和请求参数
+     */
     // Ensure terminal slash for baseURL path, so that NSURL +URLWithString:relativeToURL: works as expected
     if ([[url path] length] > 0 && ![[url absoluteString] hasSuffix:@"/"]) {
         url = [url URLByAppendingPathComponent:@""];
@@ -78,6 +82,10 @@
 
     self.baseURL = url;
 
+    /*
+     默认初始化请求和响应解析类，在父类中其实也初始化了一个AFJSONResponseSerializer，但是这里会覆盖掉父类的初始
+     并且如果外界在初始化创建完这个类的实例后，如果设置了requestSerializer或者responseSerializer，也会覆盖这边默认的初始化
+     */
     self.requestSerializer = [AFHTTPRequestSerializer serializer];
     self.responseSerializer = [AFJSONResponseSerializer serializer];
 

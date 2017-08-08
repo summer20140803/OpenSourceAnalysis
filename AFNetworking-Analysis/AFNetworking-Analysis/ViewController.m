@@ -25,7 +25,8 @@
 - (void)nativeRequest {
     NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:[[NSURL alloc] initWithString:@"http://10.1.132.140:8081/jFinalDemo/"]];
     request.HTTPMethod = @"POST";
-    request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"oufen":@"123"} options:NSJSONWritingPrettyPrinted error:nil];
+    NSString *query = @"id=123&name=oufen";
+    request.HTTPBody = [query dataUsingEncoding:NSUTF8StringEncoding];
     NSURLSession *session = [NSURLSession sharedSession];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
         if (data) {

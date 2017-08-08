@@ -44,6 +44,10 @@ typedef NSString * (^AFQueryStringSerializationBlock)(NSURLRequest *request, id 
     - parameter string: The string to be percent-escaped.
     - returns: The percent-escaped string.
  */
+
+/**
+ 对field和value进行处理，将其中的:#[]@!$&'()*+,;=替换成百分号表示的形式，
+ */
 NSString * AFPercentEscapedStringFromString(NSString *string) {
     static NSString * const kAFCharactersGeneralDelimitersToEncode = @":#[]@"; // does not include "?" or "/" due to RFC 3986 - Section 3.4
     static NSString * const kAFCharactersSubDelimitersToEncode = @"!$&'()*+,;=";
@@ -104,6 +108,9 @@ NSString * AFPercentEscapedStringFromString(NSString *string) {
     return self;
 }
 
+/**
+ 返回key=value格式且过滤掉特殊符号的字符串
+ */
 - (NSString *)URLEncodedStringValue {
     if (!self.value || [self.value isEqual:[NSNull null]]) {
         return AFPercentEscapedStringFromString([self.field description]);
@@ -119,6 +126,11 @@ NSString * AFPercentEscapedStringFromString(NSString *string) {
 FOUNDATION_EXPORT NSArray * AFQueryStringPairsFromDictionary(NSDictionary *dictionary);
 FOUNDATION_EXPORT NSArray * AFQueryStringPairsFromKeyAndValue(NSString *key, id value);
 
+/**
+ 并且返回查询参数
+ 将参数字典中的AFQueryStringPair拼接在一起
+ 例如：username=dravenss&password=123456&hello[world]=helloworld
+ */
 NSString * AFQueryStringFromParameters(NSDictionary *parameters) {
     NSMutableArray *mutablePairs = [NSMutableArray array];
     for (AFQueryStringPair *pair in AFQueryStringPairsFromDictionary(parameters)) {
@@ -128,10 +140,15 @@ NSString * AFQueryStringFromParameters(NSDictionary *parameters) {
     return [mutablePairs componentsJoinedByString:@"&"];
 }
 
+
 NSArray * AFQueryStringPairsFromDictionary(NSDictionary *dictionary) {
     return AFQueryStringPairsFromKeyAndValue(nil, dictionary);
 }
 
+
+/**
+ 参数key排序，并且value如果是集合的话，它会不断地递归自己，最后返回AFQueryStringPair的数组
+ */
 NSArray * AFQueryStringPairsFromKeyAndValue(NSString *key, id value) {
     NSMutableArray *mutableQueryStringComponents = [NSMutableArray array];
 
@@ -209,6 +226,7 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
 
     self.mutableHTTPRequestHeaders = [NSMutableDictionary dictionary];
 
+    // 根据当前系统环境预设置Accept-Language
     // Accept-Language HTTP Header; see http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.4
     NSMutableArray *acceptLanguagesComponents = [NSMutableArray array];
     [[NSLocale preferredLanguages] enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
@@ -217,7 +235,8 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
         *stop = q <= 0.5f;
     }];
     [self setValue:[acceptLanguagesComponents componentsJoinedByString:@", "] forHTTPHeaderField:@"Accept-Language"];
-
+    
+    // 根据当前系统环境预设置userAgent
     NSString *userAgent = nil;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wgnu"
@@ -244,6 +263,10 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
     // HTTP Method Definitions; see http://www.w3.org/Protocols/rfc2616/rfc2616-sec9.html
     self.HTTPMethodsEncodingParametersInURI = [NSSet setWithObjects:@"GET", @"HEAD", @"DELETE", nil];
 
+    /* 对AFHTTPRequestSerializerObservedKeyPaths集合中的
+       allowsCellularAccess/cachePolicy/HTTPShouldHandleCookies/HTTPShouldUsePipelining/networkServiceType/timeoutInterval属性
+       进行KVO监听，确保它们在改变后更新NSMutableURLRequest中对应的属性
+     */
     self.mutableObservedChangedKeyPaths = [NSMutableSet set];
     for (NSString *keyPath in AFHTTPRequestSerializerObservedKeyPaths()) {
         if ([self respondsToSelector:NSSelectorFromString(keyPath)]) {
@@ -319,6 +342,9 @@ forHTTPHeaderField:(NSString *)field
     return [self.mutableHTTPRequestHeaders valueForKey:field];
 }
 
+/**
+ 用来验证字段合理性
+ */
 - (void)setAuthorizationHeaderFieldWithUsername:(NSString *)username
                                        password:(NSString *)password
 {
@@ -344,6 +370,14 @@ forHTTPHeaderField:(NSString *)field
 
 #pragma mark -
 
+/**
+ 这个方法由AFHTTPSessionManager的
+ dataTaskWithHTTPMethod:URLString:parameters:uploadProgress:downloadProgress:success:failure:调用，
+ 主要用来：
+ 1.设置HTTP方法
+ 2.通过mutableObservedChangedKeyPaths字典设置NSMutableURLRequest的属性(allowsCellularAccess/cachePolicy/HTTPShouldHandleCookies/HTTPShouldUsePipelining/networkServiceType/timeoutInterval)
+ 3.调用requestBySerializingRequest:withParameters:error:方法设置HTTP头部字段和格式化查询参数(请求参数)
+ */
 - (NSMutableURLRequest *)requestWithMethod:(NSString *)method
                                  URLString:(NSString *)URLString
                                 parameters:(id)parameters
@@ -463,6 +497,12 @@ forHTTPHeaderField:(NSString *)field
 
 #pragma mark - AFURLRequestSerialization
 
+/**
+ 这个方法主要用来：
+ 1.通过HTTPRequestHeaders字典设置request的头部字段
+ 2.调用外界设置的queryStringSerialization的block 或者 内置的AFQueryStringFromParameters方法 获取格式化后的查询参数字符串query
+ 3.判断request的HTTP方法来决定将query追加到request.URL末尾 或者 request.HTTPBody中
+ */
 - (NSURLRequest *)requestBySerializingRequest:(NSURLRequest *)request
                                withParameters:(id)parameters
                                         error:(NSError *__autoreleasing *)error
@@ -479,6 +519,7 @@ forHTTPHeaderField:(NSString *)field
 
     NSString *query = nil;
     if (parameters) {
+        // 如果外界设置了自定义的查询参数格式化的block，则执行该block获取自定义的query
         if (self.queryStringSerialization) {
             NSError *serializationError;
             query = self.queryStringSerialization(request, parameters, &serializationError);
@@ -490,7 +531,7 @@ forHTTPHeaderField:(NSString *)field
 
                 return nil;
             }
-        } else {
+        } else { //如果没有设置则默认执行AFN内部的格式化方法`AFQueryStringFromParameters`
             switch (self.queryStringSerializationStyle) {
                 case AFHTTPRequestQueryStringDefaultStyle:
                     query = AFQueryStringFromParameters(parameters);
@@ -498,12 +539,12 @@ forHTTPHeaderField:(NSString *)field
             }
         }
     }
-
+    // 如果HTTP请求方法为GET/HEAD/DELETE，那么参数会追加到URL后面
     if ([self.HTTPMethodsEncodingParametersInURI containsObject:[[request HTTPMethod] uppercaseString]]) {
         if (query && query.length > 0) {
             mutableRequest.URL = [NSURL URLWithString:[[mutableRequest.URL absoluteString] stringByAppendingFormat:mutableRequest.URL.query ? @"&%@" : @"?%@", query]];
         }
-    } else {
+    } else { //否则会放入HTTP body中
         // #2864: an empty string is a valid x-www-form-urlencoded payload
         if (!query) {
             query = @"";
@@ -1234,6 +1275,10 @@ typedef enum {
 
 #pragma mark - AFURLRequestSerialization
 
+/**
+ 因为请求参数为Json格式的请求不可能为GET/HEAD/DELETE请求，所这里无须对请求参数进行query过滤和格式化
+ 但是如果外界设置的HTTP方法仍然为GET/HEAD/DELETE，则还是会调用父类(AFHTTPRequestSerializer)的AFURLRequestSerialization协议方法
+ */
 - (NSURLRequest *)requestBySerializingRequest:(NSURLRequest *)request
                                withParameters:(id)parameters
                                         error:(NSError *__autoreleasing *)error
@@ -1256,7 +1301,7 @@ typedef enum {
         if (![mutableRequest valueForHTTPHeaderField:@"Content-Type"]) {
             [mutableRequest setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
         }
-
+        // 与HTTP的区别在于这里的参数是直接由Json格式的数据序列化而成，而非HTTP的query格式
         [mutableRequest setHTTPBody:[NSJSONSerialization dataWithJSONObject:parameters options:self.writingOptions error:error]];
     }
 
@@ -1313,12 +1358,15 @@ typedef enum {
 
 #pragma mark - AFURLRequestSerializer
 
+/**
+ 参见AFJSONRequestSerializer，处理逻辑是一样的
+ */
 - (NSURLRequest *)requestBySerializingRequest:(NSURLRequest *)request
                                withParameters:(id)parameters
                                         error:(NSError *__autoreleasing *)error
 {
     NSParameterAssert(request);
-
+    
     if ([self.HTTPMethodsEncodingParametersInURI containsObject:[[request HTTPMethod] uppercaseString]]) {
         return [super requestBySerializingRequest:request withParameters:parameters error:error];
     }

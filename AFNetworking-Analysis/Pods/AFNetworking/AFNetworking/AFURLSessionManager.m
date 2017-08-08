@@ -38,6 +38,12 @@ static dispatch_queue_t url_session_manager_creation_queue() {
     return af_url_session_manager_creation_queue;
 }
 
+/*
+ 这里其实是一个苹果框架的BUG，如果在iOS8以下，并发地通过request去创建dataTask，有可能会返回相同taskIdentifier的task，所以它们的回调有可能会发生交叉或冲突，
+ 因此AFN在这里将创建task的代码块放在一个同步串行队列中执行，这样就能很好的规避这个问题，
+ 而这个BUG被苹果在iOS8+上解决了，所以iOS8以上并不需要考虑串行同步执行task的创建
+ Issue：https://github.com/AFNetworking/AFNetworking/issues/2093
+ */
 static void url_session_manager_create_task_safely(dispatch_block_t block) {
     if (NSFoundationVersionNumber < NSFoundationVersionNumber_With_Fixed_5871104061079552_bug) {
         // Fix of bug
@@ -144,6 +150,9 @@ typedef void (^AFURLSessionTaskCompletionHandler)(NSURLResponse *response, id re
 
 #pragma mark - NSProgress Tracking
 
+/**
+ 添加进度监控和进度完成的回调
+ */
 - (void)setupProgressForTask:(NSURLSessionTask *)task {
     __weak __typeof__(task) weakTask = task;
 
@@ -221,6 +230,9 @@ typedef void (^AFURLSessionTaskCompletionHandler)(NSURLResponse *response, id re
     [self.uploadProgress removeObserver:self forKeyPath:NSStringFromSelector(@selector(fractionCompleted))];
 }
 
+/**
+ KVO回调
+ */
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSString *,id> *)change context:(void *)context {
     if ([object isKindOfClass:[NSURLSessionTask class]] || [object isKindOfClass:[NSURLSessionDownloadTask class]]) {
         if ([keyPath isEqualToString:NSStringFromSelector(@selector(countOfBytesReceived))]) {
@@ -247,6 +259,9 @@ typedef void (^AFURLSessionTaskCompletionHandler)(NSURLResponse *response, id re
 
 #pragma mark - NSURLSessionTaskDelegate
 
+/**
+ URLSessionTask统一的处理完成/失败的回调
+ */
 - (void)URLSession:(__unused NSURLSession *)session
               task:(NSURLSessionTask *)task
 didCompleteWithError:(NSError *)error
@@ -276,7 +291,11 @@ didCompleteWithError:(NSError *)error
 
     if (error) {
         userInfo[AFNetworkingTaskDidCompleteErrorKey] = error;
-
+        
+        /*
+         利用dispatch_group_async去判断外界是否设置了completionQueue和completionGroup，
+         在多个API请求并发回调时可以很方便的让外界执行诸如dispatch_group_notify等操作(前提是外界设置了completionGroup，不然会默认使用这个类内部创建的dispatch_group_t)
+         */
         dispatch_group_async(manager.completionGroup ?: url_session_manager_completion_group(), manager.completionQueue ?: dispatch_get_main_queue(), ^{
             if (self.completionHandler) {
                 self.completionHandler(task.response, responseObject, error);
@@ -302,7 +321,10 @@ didCompleteWithError:(NSError *)error
             if (serializationError) {
                 userInfo[AFNetworkingTaskDidCompleteErrorKey] = serializationError;
             }
-
+            /*
+             利用dispatch_group_async去判断外界是否设置了completionQueue和completionGroup，
+             在多个API请求并发回调时可以很方便的让外界执行诸如dispatch_group_notify等操作(前提是外界设置了completionGroup，不然会默认使用这个类内部创建的dispatch_group_t)
+             */
             dispatch_group_async(manager.completionGroup ?: url_session_manager_completion_group(), manager.completionQueue ?: dispatch_get_main_queue(), ^{
                 if (self.completionHandler) {
                     self.completionHandler(task.response, responseObject, serializationError);
@@ -373,6 +395,9 @@ static inline BOOL af_addMethod(Class theClass, SEL selector, Method method) {
 static NSString * const AFNSURLSessionTaskDidResumeNotification  = @"com.alamofire.networking.nsurlsessiontask.resume";
 static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofire.networking.nsurlsessiontask.suspend";
 
+/**
+ 这个类只是hook了task的suspend和resume方法，并对外界发出了通知
+ */
 @interface _AFURLSessionTaskSwizzling : NSObject
 
 @end
@@ -477,6 +502,16 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
 @end
 
 #pragma mark -
+/*
+ AFURLSessionManager的主要作用：
+ 1. AFURLSessionManager 是对 NSURLSession 的封装，向外提供了delegate、block、notification等多种回调机制
+ 2. 它通过 - [AFURLSessionManager dataTaskWithRequest:completionHandler:] 等接口创建 NSURLSessionDataTask 的实例
+ 3. 持有一个字典 mutableTaskDelegatesKeyedByTaskIdentifier 管理这些 data task 实例
+ 4. 引入 AFURLSessionManagerTaskDelegate 来对传入的 uploadProgressBlock downloadProgressBlock completionHandler在合适的时间进行调用
+ 5. 实现了全部的代理方法来提供 block 接口
+ 6. 通过方法Swizzling在 data task 状态(resume/suspend/cancel)改变时，发出通知
+ 7. 持有一个AFSecurityPolicy以保证请求的安全性，调用- [AFSecurityPolicy evaluateServerTrust:forDomain:] 方法来判断当前服务器是否被信任
+*/
 
 @interface AFURLSessionManager ()
 @property (readwrite, nonatomic, strong) NSURLSessionConfiguration *sessionConfiguration;
@@ -524,7 +559,8 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     self.operationQueue.maxConcurrentOperationCount = 1;
 
     self.session = [NSURLSession sessionWithConfiguration:self.sessionConfiguration delegate:self delegateQueue:self.operationQueue];
-
+    
+    // 默认初始化一个AFJSONResponseSerializer实例用来反序列化响应数据
     self.responseSerializer = [AFJSONResponseSerializer serializer];
 
     self.securityPolicy = [AFSecurityPolicy defaultPolicy];
@@ -538,6 +574,11 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     self.lock = [[NSLock alloc] init];
     self.lock.name = AFURLSessionManagerLockName;
 
+    /*
+     它的大致作用是给self.session设置一个回调，当应用从后台切换到前台，或者是从挂起状态切换到应用唤醒状态时，
+     将获取到的还在执行(被取消、已完成/已失败的不算)的所有task，然后这里给他们重新设置相应的回调
+     详细参考 https://github.com/AFNetworking/AFNetworking/issues/3499
+     */
     [self.session getTasksWithCompletionHandler:^(NSArray *dataTasks, NSArray *uploadTasks, NSArray *downloadTasks) {
         for (NSURLSessionDataTask *task in dataTasks) {
             [self addDelegateForDataTask:task uploadProgress:nil downloadProgress:nil completionHandler:nil];
@@ -952,6 +993,9 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     return [[self class] instancesRespondToSelector:selector];
 }
 
+/**
+ AFN实现了下面的代理方法，主要是对外界执行一些block或者通知
+ */
 #pragma mark - NSURLSessionDelegate
 
 - (void)URLSession:(NSURLSession *)session
@@ -964,16 +1008,28 @@ didBecomeInvalidWithError:(NSError *)error
     [[NSNotificationCenter defaultCenter] postNotificationName:AFURLSessionDidInvalidateNotification object:session];
 }
 
+/**
+ 接收了一个来自认证的挑战
+ */
 - (void)URLSession:(NSURLSession *)session
 didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
  completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler
 {
+    /*
+     NSURLAuthenticationChallenge 表示一个认证的挑战，提供了关于这次认证的全部信息。
+     它有一个非常重要的属性 protectionSpace，这里保存了需要认证的保护空间, 
+     每一个 NSURLProtectionSpace 对象都保存了主机地址，端口和认证方法等重要信息。
+     */
     NSURLSessionAuthChallengeDisposition disposition = NSURLSessionAuthChallengePerformDefaultHandling;
     __block NSURLCredential *credential = nil;
 
     if (self.sessionDidReceiveAuthenticationChallenge) {
         disposition = self.sessionDidReceiveAuthenticationChallenge(session, challenge, &credential);
     } else {
+        /*
+         如果保护空间中的认证方法为 NSURLAuthenticationMethodServerTrust，
+         那么就会使用 -[AFSecurityPolicy evaluateServerTrust:forDomain:] 对保护空间中的 serverTrust 以及域名 host 进行认证
+         */
         if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) {
             if ([self.securityPolicy evaluateServerTrust:challenge.protectionSpace.serverTrust forDomain:challenge.protectionSpace.host]) {
                 credential = [NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust];
@@ -1014,6 +1070,11 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response
     }
 }
 
+/**
+ 参照 - (void)URLSession:(NSURLSession *)session
+ didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
+ completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler
+ */
 - (void)URLSession:(NSURLSession *)session
               task:(NSURLSessionTask *)task
 didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
