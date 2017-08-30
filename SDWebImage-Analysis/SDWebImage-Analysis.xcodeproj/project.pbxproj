@@ -553,6 +553,7 @@
 				1826583A1F35BC980011428C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 		1826583B1F35BC980011428C /* Build configuration list for PBXNativeTarget "SDWebImage-AnalysisTests" */ = {
 			isa = XCConfigurationList;
@@ -561,6 +562,7 @@
 				1826583D1F35BC980011428C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};

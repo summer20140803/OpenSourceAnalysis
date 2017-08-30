@@ -15,23 +15,31 @@ typedef NS_OPTIONS(NSUInteger, SDWebImageOptions) {
     /**
      * By default, when a URL fail to be downloaded, the URL is blacklisted so the library won't keep trying.
      * This flag disable this blacklisting.
+     
+     * @translate: 如果下载失败，则不会加入黑名单，会尝试再次下载
      */
     SDWebImageRetryFailed = 1 << 0,
 
     /**
      * By default, image downloads are started during UI interactions, this flags disable this feature,
      * leading to delayed download on UIScrollView deceleration for instance.
+     
+     * @translate: 不会在UI交互期间开启图片下载，例如只会在UIScrollView减速的时候开始下载
      */
     SDWebImageLowPriority = 1 << 1,
 
     /**
      * This flag disables on-disk caching
+     
+     * @translate: 禁止disk(硬盘)缓存，只会进行内存缓存
      */
     SDWebImageCacheMemoryOnly = 1 << 2,
 
     /**
      * This flag enables progressive download, the image is displayed progressively during download as a browser would do.
      * By default, the image is only displayed once completely downloaded.
+     
+     * @translate: 启用渐进式下载，像Web网页上的图片一样，会逐步地显示图像，一截一截显示
      */
     SDWebImageProgressiveDownload = 1 << 3,
 
@@ -42,36 +50,49 @@ typedef NS_OPTIONS(NSUInteger, SDWebImageOptions) {
      * If a cached image is refreshed, the completion block is called once with the cached image and again with the final image.
      *
      * Use this flag only if you can't make your URLs static with embedded cache busting parameter.
+     
+     * @translate: 即使图片已经缓存了，还是会遵从HTTP响应缓存控制，如果需要，会从远程位置刷新图片并更新缓存，
+     * 这种配置适用于两个相同的图片url，但是图片可能更新了的情景，此时还是会去远程下载图片并更新缓存，此时completion block会被调用
      */
     SDWebImageRefreshCached = 1 << 4,
 
     /**
      * In iOS 4+, continue the download of the image if the app goes to background. This is achieved by asking the system for
      * extra time in background to let the request finish. If the background task expires the operation will be cancelled.
+     
+     * @translate: ios4以后，如果app进入后台，也会保持下载图片，但这需要取得用户权限，并且如果后台任务过期，操作也将会被取消
      */
     SDWebImageContinueInBackground = 1 << 5,
 
     /**
      * Handles cookies stored in NSHTTPCookieStore by setting
      * NSMutableURLRequest.HTTPShouldHandleCookies = YES;
+     
+     * @translate: 如果设置了HTTPShouldHandleCookies = YES，则会处理cookies
      */
     SDWebImageHandleCookies = 1 << 6,
 
     /**
      * Enable to allow untrusted SSL certificates.
      * Useful for testing purposes. Use with caution in production.
+     
+     * @translate: 允许使用无效的SSL证书，用户自测时可以使用，生产环境慎用
      */
     SDWebImageAllowInvalidSSLCertificates = 1 << 7,
 
     /**
      * By default, images are loaded in the order in which they were queued. This flag moves them to
      * the front of the queue.
+     
+     * @translate: 优先下载图片，内部会设置operation.queuePriority = NSOperationQueuePriorityHigh;
      */
     SDWebImageHighPriority = 1 << 8,
     
     /**
      * By default, placeholder images are loaded while the image is loading. This flag will delay the loading
      * of the placeholder image until after the image has finished loading.
+     
+     * @translate: 延迟加载占位图，直到获取到真正的图片
      */
     SDWebImageDelayPlaceholder = 1 << 9,
 
@@ -79,6 +100,9 @@ typedef NS_OPTIONS(NSUInteger, SDWebImageOptions) {
      * We usually don't call transformDownloadedImage delegate method on animated images,
      * as most transformation code would mangle it.
      * Use this flag to transform them anyway.
+     
+     * @translate:在具有动画的图片上如果调用了transformDownloadedImage的代理方法，进行一些图片的transform操作，可能会导致图片形变或者不能达到理想的效果
+     * 开启这个选项将会始终调用transformDownloadedImage的代理方法
      */
     SDWebImageTransformAnimatedImage = 1 << 10,
     
@@ -86,6 +110,9 @@ typedef NS_OPTIONS(NSUInteger, SDWebImageOptions) {
      * By default, image is added to the imageView after download. But in some cases, we want to
      * have the hand before setting the image (apply a filter or add it with cross-fade animation for instance)
      * Use this flag if you want to manually set the image in the completion when success
+     
+     * @translate: 图片在下载后被加载到imageView。但是在一些情况下，我们想要设置一下图片(引用一个滤镜或者加入显隐动画)
+     * 开启这个选项将不会在SDK内部设置image到对应的imageView上，而是交由completion把image等信息传递给外界去处理
      */
     SDWebImageAvoidAutoSetImage = 1 << 11,
     
@@ -93,6 +120,8 @@ typedef NS_OPTIONS(NSUInteger, SDWebImageOptions) {
      * By default, images are decoded respecting their original size. On iOS, this flag will scale down the
      * images to a size compatible with the constrained memory of devices.
      * If `SDWebImageProgressiveDownload` flag is set the scale down is deactivated.
+     
+     * @translate: 默认情况下图像将根据其原始大小进行解码，在iOS上，开启此选项会将图片缩小到与设备的受限内存兼容的大小
      */
     SDWebImageScaleDownLargeImages = 1 << 12
 };

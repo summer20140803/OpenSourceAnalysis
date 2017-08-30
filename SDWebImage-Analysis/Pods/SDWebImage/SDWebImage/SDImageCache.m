@@ -161,9 +161,19 @@ FOUNDATION_STATIC_INLINE NSUInteger SDCacheCostForImage(UIImage *image) {
 }
 
 - (nullable NSString *)defaultCachePathForKey:(nullable NSString *)key {
+    /** 
+     diskCachePath为SDK内部创建好的总缓存文件目录路径，
+     对应的某张图片的具体缓存路径应该是self.diskCachePath(路径前缀)+对cachekey进行md5生成的路径后缀 
+     */
     return [self cachePathForKey:key inPath:self.diskCachePath];
 }
 
+/**
+ 根据cacheKey获取对应的硬盘缓存文件目录(通过md5对cacheKey加密并格式化得到最终的缓存目录)
+
+ @param key cacheKey(如果外界没有设置cacheKeyFilter，则cacheKey默认就是url.absoluteString)
+ @return 对应图片的硬盘缓存文件目录路径
+ */
 - (nullable NSString *)cachedFileNameForKey:(nullable NSString *)key {
     const char *str = key.UTF8String;
     if (str == NULL) {
@@ -318,11 +328,13 @@ FOUNDATION_STATIC_INLINE NSUInteger SDCacheCostForImage(UIImage *image) {
 
     // fallback because of https://github.com/rs/SDWebImage/pull/976 that added the extension to the disk file name
     // checking the key with and without the extension
+    /** 这里修复了一个由缓存文件后缀名引起的Bug，如果带后缀名的缓存目录中找不到data，则尝试删除后缀名继续查找 */
     data = [NSData dataWithContentsOfFile:defaultPath.stringByDeletingPathExtension];
     if (data) {
         return data;
     }
 
+    /** 最后尝试在自定义的缓存目录前缀路径中取查找对应的缓存data(自定义目录通过本类的-addReadOnlyCachePath:方法添加) */
     NSArray<NSString *> *customPaths = [self.customPaths copy];
     for (NSString *path in customPaths) {
         NSString *filePath = [self cachePathForKey:key inPath:path];
@@ -339,14 +351,22 @@ FOUNDATION_STATIC_INLINE NSUInteger SDCacheCostForImage(UIImage *image) {
         }
     }
 
+    /** 还是没找到则返回nil */
     return nil;
 }
 
+/**
+ 从硬盘缓存目录中通过cacheKey查找已缓存的图片并进行处理
+
+ @param key cacheKey
+ @return 硬盘中已缓存的图片
+ */
 - (nullable UIImage *)diskImageForKey:(nullable NSString *)key {
     NSData *data = [self diskImageDataBySearchingAllPathsForKey:key];
     if (data) {
         UIImage *image = [UIImage sd_imageWithData:data];
         image = [self scaledImageForKey:key image:image];
+        /** 如果config中设置了shouldDecompressImages，则SDK会对未解码的image进行解压(解码) */
         if (self.config.shouldDecompressImages) {
             image = [UIImage decodedImageWithImage:image];
         }
@@ -360,7 +380,15 @@ FOUNDATION_STATIC_INLINE NSUInteger SDCacheCostForImage(UIImage *image) {
     return SDScaledImageForKey(key, image);
 }
 
+/**
+ 根据cacheKey查询是否有缓存
+
+ @param key cacheKey
+ @param doneBlock 查询完毕的block
+ @return cacheOperation
+ */
 - (nullable NSOperation *)queryCacheOperationForKey:(nullable NSString *)key done:(nullable SDCacheQueryCompletedBlock)doneBlock {
+    /** 如果key不存在，就直接返回空结果的doneBlock */
     if (!key) {
         if (doneBlock) {
             doneBlock(nil, nil, SDImageCacheTypeNone);
@@ -369,19 +397,25 @@ FOUNDATION_STATIC_INLINE NSUInteger SDCacheCostForImage(UIImage *image) {
     }
 
     // First check the in-memory cache...
+    /** 首先在内存中查询是否有缓存的图片，如果有则执行doneBlock并直接返回nil，不用创建operation了 */
     UIImage *image = [self imageFromMemoryCacheForKey:key];
     if (image) {
         NSData *diskData = nil;
+        /** 如果是image是一组动画图片，则data从硬盘缓存中取查找 */
         if ([image isGIF]) {
             diskData = [self diskImageDataBySearchingAllPathsForKey:key];
         }
         if (doneBlock) {
+            /** 告诉外界，image是从内存中查找到的 */
             doneBlock(image, diskData, SDImageCacheTypeMemory);
         }
         return nil;
     }
 
+    /** 如果内存中没找到，就尝试去硬盘中取查找 */
+    
     NSOperation *operation = [NSOperation new];
+    /** ioQueue是一个初始化时创建的同步串行队列，这里异步执行 */
     dispatch_async(self.ioQueue, ^{
         if (operation.isCancelled) {
             // do not call the completion if cancelled
@@ -391,6 +425,7 @@ FOUNDATION_STATIC_INLINE NSUInteger SDCacheCostForImage(UIImage *image) {
         @autoreleasepool {
             NSData *diskData = [self diskImageDataBySearchingAllPathsForKey:key];
             UIImage *diskImage = [self diskImageForKey:key];
+            /** 如果在config中配置shouldCacheImagesInMemory为YES，则会将硬盘中缓存的image放入内存中 */
             if (diskImage && self.config.shouldCacheImagesInMemory) {
                 NSUInteger cost = SDCacheCostForImage(diskImage);
                 [self.memCache setObject:diskImage forKey:key cost:cost];
@@ -398,6 +433,7 @@ FOUNDATION_STATIC_INLINE NSUInteger SDCacheCostForImage(UIImage *image) {
 
             if (doneBlock) {
                 dispatch_async(dispatch_get_main_queue(), ^{
+                    /** 告诉外界，image是从硬盘中查找到的 */
                     doneBlock(diskImage, diskData, SDImageCacheTypeDisk);
                 });
             }

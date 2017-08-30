@@ -54,11 +54,17 @@
     return self;
 }
 
+/**
+ 通过url获取cacheKey
+
+ @param url 图片url
+ @return 缓存图片对应的key
+ */
 - (nullable NSString *)cacheKeyForURL:(nullable NSURL *)url {
     if (!url) {
         return @"";
     }
-
+    /** 如果外界设置了自定义的cacheKey和图片url的映射，则由cacheKeyFilter获取自定义的cacheKey */
     if (self.cacheKeyFilter) {
         return self.cacheKeyFilter(url);
     } else {
@@ -102,6 +108,15 @@
     }];
 }
 
+/**
+ SDWebImageManager负责获取图片的主要方法
+
+ @param url 图片url
+ @param options SDWebImageOptions枚举选项
+ @param progressBlock 下载进度监听block
+ @param completedBlock 完成监听block
+ @return 获取图片的`操作`实例
+ */
 - (id <SDWebImageOperation>)loadImageWithURL:(nullable NSURL *)url
                                      options:(SDWebImageOptions)options
                                     progress:(nullable SDWebImageDownloaderProgressBlock)progressBlock
@@ -122,7 +137,8 @@
 
     __block SDWebImageCombinedOperation *operation = [SDWebImageCombinedOperation new];
     __weak SDWebImageCombinedOperation *weakOperation = operation;
-
+    
+    /** 判断这个url是否曾经加载失败 */
     BOOL isFailedUrl = NO;
     if (url) {
         @synchronized (self.failedURLs) {
@@ -130,23 +146,32 @@
         }
     }
 
+    /** 如果url为空或者url是已经失败了的url且options不包含失败重试的选项，则直接执行completion block将error传给外界 */
     if (url.absoluteString.length == 0 || (!(options & SDWebImageRetryFailed) && isFailedUrl)) {
         [self callCompletionBlockForOperation:operation completion:completedBlock error:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorFileDoesNotExist userInfo:nil] url:url];
         return operation;
     }
 
+    /** 加入到正在执行的operations数组中 */
     @synchronized (self.runningOperations) {
         [self.runningOperations addObject:operation];
     }
+    /** 根据图片url获取到对应的缓存key */
     NSString *key = [self cacheKeyForURL:url];
 
+    /** 先从缓存中查询是否有cacheKey所对应的已缓存的图片 */
     operation.cacheOperation = [self.imageCache queryCacheOperationForKey:key done:^(UIImage *cachedImage, NSData *cachedData, SDImageCacheType cacheType) {
         if (operation.isCancelled) {
             [self safelyRemoveOperationFromRunning:operation];
             return;
         }
 
+        /** 
+         如果没有拿到缓存图片，或者options包含了SDWebImageRefreshCached选项，
+         如果上述两者条件满足至少其一并且外界没有实现imageManager:shouldDownloadImageForURL:协议方法或者实现并return YES，则将开始一系列的下载工作
+         */
         if ((!cachedImage || options & SDWebImageRefreshCached) && (![self.delegate respondsToSelector:@selector(imageManager:shouldDownloadImageForURL:)] || [self.delegate imageManager:self shouldDownloadImageForURL:url])) {
+            /** 如果有缓存图片但是options中包含了SDWebImageRefreshCached选项 */
             if (cachedImage && options & SDWebImageRefreshCached) {
                 // If image was found in the cache but SDWebImageRefreshCached is provided, notify about the cached image
                 // AND try to re-download it in order to let a chance to NSURLCache to refresh it from server.
@@ -318,6 +343,9 @@
     }
 }
 
+/**
+ 只是封装了取消`操作`的相关代码
+ */
 - (void)cancel {
     self.cancelled = YES;
     if (self.cacheOperation) {

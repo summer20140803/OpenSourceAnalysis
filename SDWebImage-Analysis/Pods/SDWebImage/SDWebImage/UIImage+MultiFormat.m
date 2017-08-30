@@ -23,7 +23,9 @@
     }
     
     UIImage *image;
+    /** 通过data获取图片的后缀类型 */
     SDImageFormat imageFormat = [NSData sd_imageFormatForImageData:data];
+    /** 特殊处理GIF类型的图片 */
     if (imageFormat == SDImageFormatGIF) {
         image = [UIImage sd_animatedGIFWithData:data];
     }
@@ -36,6 +38,7 @@
     else {
         image = [[UIImage alloc] initWithData:data];
 #if SD_UIKIT || SD_WATCH
+        /** 获取图片的方向 */
         UIImageOrientation orientation = [self sd_imageOrientationFromImageData:data];
         if (orientation != UIImageOrientationUp) {
             image = [UIImage imageWithCGImage:image.CGImage

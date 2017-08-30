@@ -15,6 +15,13 @@
 static const size_t kBytesPerPixel = 4;
 static const size_t kBitsPerComponent = 8;
 
+/**
+ 对下载或者缓存的未解码的image进行解码，这有助于提高性能，但是解码过程会消耗大量的内存，
+ 可通过设置SDImageCacheConfig的shouldDecompressImages属性为NO进行关闭解码操作
+
+ @param image 原始图片
+ @return 解码后的图片
+ */
 + (nullable UIImage *)decodedImageWithImage:(nullable UIImage *)image {
     if (![UIImage shouldDecodeImage:image]) {
         return image;

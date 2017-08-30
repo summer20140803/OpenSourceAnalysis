@@ -28,6 +28,12 @@ typedef NSMutableDictionary<NSString *, id> SDOperationsDictionary;
     return operations;
 }
 
+/**
+ 先取消当前operationDictionary中正在进行的异步下载操作，然后再将传入的operation保存在operationDictionary中
+
+ @param operation 即将进行的操作
+ @param key 动态属性的key
+ */
 - (void)sd_setImageLoadOperation:(nullable id)operation forKey:(nullable NSString *)key {
     if (key) {
         [self sd_cancelImageLoadOperationWithKey:key];
@@ -38,6 +44,11 @@ typedef NSMutableDictionary<NSString *, id> SDOperationsDictionary;
     }
 }
 
+/**
+ 取消当前operationDictionary中正在进行的异步下载操作
+
+ @param key 动态属性的key
+ */
 - (void)sd_cancelImageLoadOperationWithKey:(nullable NSString *)key {
     // Cancel in progress downloader from queue
     SDOperationsDictionary *operationDictionary = [self operationDictionary];

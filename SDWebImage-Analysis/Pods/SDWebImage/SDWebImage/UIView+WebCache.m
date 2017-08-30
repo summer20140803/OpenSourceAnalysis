@@ -34,10 +34,13 @@ static char TAG_ACTIVITY_SHOW;
                      setImageBlock:(nullable SDSetImageBlock)setImageBlock
                           progress:(nullable SDWebImageDownloaderProgressBlock)progressBlock
                          completed:(nullable SDExternalCompletionBlock)completedBlock {
+    
+    /** 这里首先取消当前正在进行的异步下载操作，避免与即将进行的操作发生冲突 */
     NSString *validOperationKey = operationKey ?: NSStringFromClass([self class]);
     [self sd_cancelImageLoadOperationWithKey:validOperationKey];
     objc_setAssociatedObject(self, &imageURLKey, url, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     
+    /** 如果传入的options里没有包含SDWebImageDelayPlaceholder，则会为对应的视图添加一个临时的占位图 */
     if (!(options & SDWebImageDelayPlaceholder)) {
         dispatch_main_async_safe(^{
             [self sd_setImage:placeholder imageData:nil basedOnClassOrViaCustomSetImageBlock:setImageBlock];
@@ -45,14 +48,19 @@ static char TAG_ACTIVITY_SHOW;
     }
     
     if (url) {
-        // check if activityView is enabled or not
+        /** 
+         如果外界设置了-(void)sd_setShowActivityIndicatorView:(BOOL)show方法并设置为了YES，
+         则这里会添加一个加载状态的菊花到对应的view上
+         */
         if ([self sd_showActivityIndicatorView]) {
             [self sd_addActivityIndicator];
         }
         
+        /** 将图片url传给SDWebImageManager，SDWebImageManager通过url获取网络或者本地缓存图片 */
         __weak __typeof(self)wself = self;
         id <SDWebImageOperation> operation = [SDWebImageManager.sharedManager loadImageWithURL:url options:options progress:progressBlock completed:^(UIImage *image, NSData *data, NSError *error, SDImageCacheType cacheType, BOOL finished, NSURL *imageURL) {
             __strong __typeof (wself) sself = wself;
+            /** 移除加载的菊花 */
             [sself sd_removeActivityIndicator];
             if (!sself) {
                 return;
@@ -61,25 +69,41 @@ static char TAG_ACTIVITY_SHOW;
                 if (!sself) {
                     return;
                 }
+                /** 如果传入的options包含SDWebImageAvoidAutoSetImage，则会将imageView上设置image的逻辑直接交由外界设置的completedBlock执行 */
                 if (image && (options & SDWebImageAvoidAutoSetImage) && completedBlock) {
                     completedBlock(image, error, cacheType, url);
                     return;
-                } else if (image) {
+                }
+                /** 
+                 如果不满足上述条件，但是下载或者从缓存中获取的网络图片不为空，则会直接通过外界传递过来的setImageBlock去设置到对应的view上，
+                 setImageBlock主要是SDK内部的UIView的子类(UIButton、UIImageView的分类)去设置，包括将图片作为imageView的高亮图片或者button的背景图片
+                 sd_setNeedsLayout会调用系统的layoutSubviews方法，如果使用者在自定义的view中重写了layoutSubviews方法，将重新刷新布局
+                 */
+                else if (image) {
                     [sself sd_setImage:image imageData:data basedOnClassOrViaCustomSetImageBlock:setImageBlock];
                     [sself sd_setNeedsLayout];
-                } else {
+                }
+                /** 如果获取不到图片 */
+                else {
+                    /** 
+                     如果外界传入的options包含了SDWebImageDelayPlaceholder，则此时SDK才会将占位图设置到imageView上，
+                     这意味着如果成功获取到了图片，就从始至终不会给imageView设置占位图了
+                     */
                     if ((options & SDWebImageDelayPlaceholder)) {
                         [sself sd_setImage:placeholder imageData:nil basedOnClassOrViaCustomSetImageBlock:setImageBlock];
                         [sself sd_setNeedsLayout];
                     }
                 }
+                /** 将完成的回调返回给外部，cacheType指明了图片是从 网络下载/内存缓存/硬盘缓存 三者中的哪一种方式获取的 */
                 if (completedBlock && finished) {
                     completedBlock(image, error, cacheType, url);
                 }
             });
         }];
+        /** 更新operationDictionary */
         [self sd_setImageLoadOperation:operation forKey:validOperationKey];
     } else {
+        /** url为空，生成error并通过completedBlock传递给外界 */
         dispatch_main_async_safe(^{
             [self sd_removeActivityIndicator];
             if (completedBlock) {
