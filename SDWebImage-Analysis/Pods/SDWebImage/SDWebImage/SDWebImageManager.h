@@ -52,7 +52,8 @@ typedef NS_OPTIONS(NSUInteger, SDWebImageOptions) {
      * Use this flag only if you can't make your URLs static with embedded cache busting parameter.
      
      * @translate: 即使图片已经缓存了，还是会遵从HTTP响应缓存控制，如果需要，会从远程位置刷新图片并更新缓存，
-     * 这种配置适用于两个相同的图片url，但是图片可能更新了的情景，此时还是会去远程下载图片并更新缓存，此时completion block会被调用
+     * 这种配置适用于两个相同的图片url，但是图片可能更新了的情景，
+     * 此时会先执行一个completion block将查询到的的缓存图片返回，并会继续去远程下载图片并更新缓存，然后再执行一次completion block将下载后的最终的图片返回给使用者
      */
     SDWebImageRefreshCached = 1 << 4,
 

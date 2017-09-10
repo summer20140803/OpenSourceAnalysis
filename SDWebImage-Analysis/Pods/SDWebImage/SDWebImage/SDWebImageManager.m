@@ -175,10 +175,12 @@
             if (cachedImage && options & SDWebImageRefreshCached) {
                 // If image was found in the cache but SDWebImageRefreshCached is provided, notify about the cached image
                 // AND try to re-download it in order to let a chance to NSURLCache to refresh it from server.
+                /** 直接执行completion block将查询到的旧的缓存图片返回给使用者(!后续会继续download远程的url图片并更新缓存) */
                 [self callCompletionBlockForOperation:weakOperation completion:completedBlock image:cachedImage data:cachedData error:nil cacheType:cacheType finished:YES url:url];
             }
 
             // download if no image or requested to refresh anyway, and download allowed by delegate
+            /** 将manager的SDWebImageOptions转换成downloader对应的SDWebImageDownloaderOptions */
             SDWebImageDownloaderOptions downloaderOptions = 0;
             if (options & SDWebImageLowPriority) downloaderOptions |= SDWebImageDownloaderLowPriority;
             if (options & SDWebImageProgressiveDownload) downloaderOptions |= SDWebImageDownloaderProgressiveDownload;
@@ -191,11 +193,14 @@
             
             if (cachedImage && options & SDWebImageRefreshCached) {
                 // force progressive off if image already cached but forced refreshing
+                /** 强制关闭渐进式下载(像Web网页上的图片一样，会逐步地显示图像，一截一截显示) */
                 downloaderOptions &= ~SDWebImageDownloaderProgressiveDownload;
                 // ignore image read from NSURLCache if image if cached but force refreshing
+                /** 强制开启忽略缓存响应(将不会从NSURLCache中读取缓存图片) */
                 downloaderOptions |= SDWebImageDownloaderIgnoreCachedResponse;
             }
             
+            /** 根据 图片url和下载选项downloaderOptions 开始下载 */
             SDWebImageDownloadToken *subOperationToken = [self.imageDownloader downloadImageWithURL:url options:downloaderOptions progress:progressBlock completed:^(UIImage *downloadedImage, NSData *downloadedData, NSError *error, BOOL finished) {
                 __strong __typeof(weakOperation) strongOperation = weakOperation;
                 if (!strongOperation || strongOperation.isCancelled) {
@@ -204,7 +209,8 @@
                     // if we would call the completedBlock, there could be a race condition between this block and another completedBlock for the same object, so if this one is called second, we will overwrite the new data
                 } else if (error) {
                     [self callCompletionBlockForOperation:strongOperation completion:completedBlock error:error url:url];
-
+                    
+                    /** 如果errorCode是如下的这些code之一，则SDK会将url加入failedURLs数组中 */
                     if (   error.code != NSURLErrorNotConnectedToInternet
                         && error.code != NSURLErrorCancelled
                         && error.code != NSURLErrorTimedOut
@@ -219,6 +225,7 @@
                     }
                 }
                 else {
+                    /** 下载图片后在failedURLs中移除此url(如果有的话) */
                     if ((options & SDWebImageRetryFailed)) {
                         @synchronized (self.failedURLs) {
                             [self.failedURLs removeObject:url];
@@ -304,6 +311,9 @@
     }
 }
 
+/**
+ 执行一个传递error的completionBlock
+ */
 - (void)callCompletionBlockForOperation:(nullable SDWebImageCombinedOperation*)operation
                              completion:(nullable SDInternalCompletionBlock)completionBlock
                                   error:(nullable NSError *)error

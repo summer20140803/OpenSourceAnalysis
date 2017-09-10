@@ -85,6 +85,7 @@ typedef NSMutableDictionary<NSString *, id> SDCallbacksDictionary;
 - (nullable id)addHandlersForProgress:(nullable SDWebImageDownloaderProgressBlock)progressBlock
                             completed:(nullable SDWebImageDownloaderCompletedBlock)completedBlock {
     SDCallbacksDictionary *callbacks = [NSMutableDictionary new];
+    /** 这里需要对block进行copy，否则会在scope结束时释放 */
     if (progressBlock) callbacks[kProgressCallbackKey] = [progressBlock copy];
     if (completedBlock) callbacks[kCompletedCallbackKey] = [completedBlock copy];
     dispatch_barrier_async(self.barrierQueue, ^{

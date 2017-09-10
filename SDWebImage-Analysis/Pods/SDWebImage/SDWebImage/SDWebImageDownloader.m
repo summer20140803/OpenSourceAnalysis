@@ -185,24 +185,31 @@
         else {
             request.allHTTPHeaderFields = sself.HTTPHeaders;
         }
+        /** 开始创建SDWebImageDownloaderOperation或者SDWebImageDownloaderOperation子类 */
         SDWebImageDownloaderOperation *operation = [[sself.operationClass alloc] initWithRequest:request inSession:sself.session options:options];
+        
+        /** 设置是否需要对下载的图片进行解码操作 */
         operation.shouldDecompressImages = sself.shouldDecompressImages;
         
+        /** 设置operation的安全证书凭证，如果证书凭证没有，就通过username和password去生成一张 */
         if (sself.urlCredential) {
             operation.credential = sself.urlCredential;
         } else if (sself.username && sself.password) {
             operation.credential = [NSURLCredential credentialWithUser:sself.username password:sself.password persistence:NSURLCredentialPersistenceForSession];
         }
         
+        /** 设置operation的下载优先级 */
         if (options & SDWebImageDownloaderHighPriority) {
             operation.queuePriority = NSOperationQueuePriorityHigh;
         } else if (options & SDWebImageDownloaderLowPriority) {
             operation.queuePriority = NSOperationQueuePriorityLow;
         }
 
+        /** 开始加入到下载队列中，开始下载 */
         [sself.downloadQueue addOperation:operation];
         if (sself.executionOrder == SDWebImageDownloaderLIFOExecutionOrder) {
             // Emulate LIFO execution order by systematically adding new operations as last operation's dependency
+            /** 如果执行次序是LIFO(栈)，则队列中的最后一个任务将依赖于新生成的operation */
             [sself.lastAddedOperation addDependency:operation];
             sself.lastAddedOperation = operation;
         }
@@ -235,9 +242,14 @@
 
     __block SDWebImageDownloadToken *token = nil;
 
+    /** 
+     barrierQueue为一个自定义的全局并发队列，
+     dispatch_barrier_sync保证多个操作之间是同步且有序地执行
+     */
     dispatch_barrier_sync(self.barrierQueue, ^{
         SDWebImageDownloaderOperation *operation = self.URLOperations[url];
         if (!operation) {
+            /** 如果URLOperations中没有找到对应url的operation，则用外部传入的createCallback创建operation */
             operation = createCallback();
             self.URLOperations[url] = operation;
 
@@ -252,6 +264,7 @@
 				});
             };
         }
+        /** 返回的是SDCallbacksDictionary实例，主要用于同时保存progressBlock和completedBlock */
         id downloadOperationCancelToken = [operation addHandlersForProgress:progressBlock completed:completedBlock];
 
         token = [SDWebImageDownloadToken new];

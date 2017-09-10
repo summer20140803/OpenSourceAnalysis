@@ -56,14 +56,19 @@ typedef NS_OPTIONS(NSUInteger, SDWebImageDownloaderOptions) {
     SDWebImageDownloaderScaleDownLargeImages = 1 << 8,
 };
 
+/**
+ 下载操作的执行顺序
+ */
 typedef NS_ENUM(NSInteger, SDWebImageDownloaderExecutionOrder) {
     /**
      * Default value. All download operations will execute in queue style (first-in-first-out).
+     * 按照队列结构，先进先出
      */
     SDWebImageDownloaderFIFOExecutionOrder,
 
     /**
      * All download operations will execute in stack style (last-in-first-out).
+     * 按照栈结构，后进先出
      */
     SDWebImageDownloaderLIFOExecutionOrder
 };
